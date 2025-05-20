@@ -1,0 +1,24 @@
+[
+  {
+    "arguments": [
+      "/usr/sbin/c++",
+      "-DGUID_LIBUUID",
+      "-DXEUS_GAB_EXPORTS",
+      "-I/home/tr/repos/xeus-gab/include",
+      "-Wunused-parameter",
+      "-Wextra",
+      "-Wreorder",
+      "-std=c++17",
+      "-Wunused-parameter",
+      "-Wextra",
+      "-Wreorder",
+      "-c",
+      "-o",
+      "CMakeFiles/xgab.dir/src/main.cpp.o",
+      "/home/tr/repos/xeus-gab/src/main.cpp"
+    ],
+    "directory": "/home/tr/repos/xeus-gab/build",
+    "file": "/home/tr/repos/xeus-gab/src/main.cpp",
+    "output": "/home/tr/repos/xeus-gab/build/CMakeFiles/xgab.dir/src/main.cpp.o"
+  }
+]

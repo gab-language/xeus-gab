@@ -1,0 +1,8 @@
+name: xeus-gab
+channels:
+  - conda-forge
+dependencies:
+  - xeus-gab=0.1.0
+  - notebook
+  - ipywidgets>=7.6
+  - jupyterlab=3

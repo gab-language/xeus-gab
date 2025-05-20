@@ -1,0 +1,11 @@
+{
+  "display_name": "gab 0.0.3 (xgab)",
+  "argv": [
+      "@XEUS_GAB_KERNELSPEC_PATH@xgab",
+      "-f",
+      "{connection_file}"
+  ],
+  "language": "gab",
+  "metadata": {"debugger": false
+  }
+}
