@@ -7,6 +7,7 @@
  ****************************************************************************/
 
 #include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,11 @@ static const char *default_modules[] = {
     "Records", "Shapes",   "Fibers",   "Channels", "__core",
     "Ranges",  "Streams",  "IO",
 };
+static const char *default_module_values[] = {
+    tGAB_STRING, tGAB_BINARY, tGAB_MESSAGE, tGAB_NUMBER,  tGAB_BLOCK,
+    tGAB_RECORD, tGAB_SHAPE,  tGAB_FIBER,   tGAB_CHANNEL, "__core",
+    "Ranges",    "Streams",   "IO",
+};
 static const size_t ndefault_modules = LEN_CARRAY(default_modules);
 
 interpreter::interpreter() {
@@ -38,7 +44,6 @@ interpreter::interpreter() {
           .jobs = 8,
           .len = ndefault_modules,
           .modules = default_modules,
-          .joberr_handler = nullptr,
       },
       &gab);
 
@@ -49,58 +54,101 @@ interpreter::interpreter() {
   env = gab_cinvalid;
 }
 
+bool check_res(struct gab_triple gab, union gab_value_pair res,
+               interpreter::send_reply_callback cb) {
+  if (res.status != gab_cvalid) {
+    gab_value *err = gab_egerrs(gab.eg);
+    std::string error;
+
+    for (gab_value *thiserr = err; *thiserr != gab_nil; thiserr++) {
+      assert(gab_valkind(*thiserr) == kGAB_RECORD);
+
+      if (*thiserr == res.vresult)
+        continue;
+
+      const char *errstr = gab_errtocs(gab, *thiserr);
+      assert(errstr != nullptr);
+
+      error += errstr;
+    };
+
+    free(err);
+
+    const char *errstr = gab_errtocs(gab, res.vresult);
+    assert(errstr != nullptr);
+
+    error += errstr;
+
+    cb(xeus::create_error_reply(error));
+
+    return true;
+  }
+
+  return false;
+}
+
+bool check_vresult(struct gab_triple gab, union gab_value_pair res,
+                   interpreter::send_reply_callback cb) {
+  return check_res(gab, res, cb);
+}
+
+bool check_aresult(struct gab_triple gab, union gab_value_pair res,
+                   interpreter::send_reply_callback cb) {
+  if (check_res(gab, res, cb))
+    return true;
+
+  if (res.aresult->data[0] != gab_ok) {
+    const char *errstr = gab_errtocs(gab, res.aresult->data[1]);
+    assert(errstr != nullptr);
+
+    cb(xeus::create_error_reply(errstr));
+
+    return true;
+  }
+
+  return false;
+}
+
 void interpreter::execute_request_impl(
     send_reply_callback cb,  // Callback to send the result
     int execution_counter,   // Typically the cell number
     const std::string &code, // Code to execute
     xeus::execute_request_config config, nl::json /*user_expressions*/) {
 
-  union gab_value_pair fiber;
+  // If we *do* have an environment, just use that.
+  size_t len = env == gab_cinvalid ? 0 : (gab_reclen(env) - 1);
+  std::vector<const char *> keys = {};
+  std::vector<gab_value> keyvals = {};
+  std::vector<gab_value> vals = {};
 
-  if (env == gab_cinvalid) {
-    // If we don't have an initialized environment, use our default modules.
-    fiber =
-        gab_aexec(gab, (struct gab_exec_argt){
-                           .name = std::to_string(execution_counter).c_str(),
-                           .source = code.c_str(),
-                           .len = ndefault_modules,
-                           .sargv = default_modules,
-                           .argv = create_res->data + 1,
-                           .flags = 0,
-                       });
-  } else {
-    // If we *do* have an environment, just use that.
-    size_t len = gab_reclen(env) - 1;
-    std::vector<const char *> keys = {};
-    std::vector<gab_value> keyvals = {};
-    std::vector<gab_value> vals = {};
-
-    for (size_t i = 0; i < len; i++) {
-      size_t index = i + 1;
-      keyvals.push_back(gab_ukrecat(env, index));
-      vals.push_back(gab_uvrecat(env, index));
-      keys.push_back(gab_strdata(&keyvals[i]));
-    }
-
-    fiber =
-        gab_aexec(gab, (struct gab_exec_argt){
-                           .name = std::to_string(execution_counter).c_str(),
-                           .source = code.c_str(),
-                           .len = len,
-                           .sargv = keys.data(),
-                           .argv = vals.data(),
-                           .flags = 0,
-                       });
+  for (size_t i = 0; i < len; i++) {
+    size_t index = i + 1;
+    keyvals.push_back(gab_ukrecat(env, index));
+    keys.push_back(gab_strdata(&keyvals[i]));
+    vals.push_back(gab_uvrecat(env, index));
   }
 
-  if (fiber.status != gab_cvalid) {
-    std::string estring = gab_errtocs(this->gab, fiber.vresult);
+  for (size_t i = 0; i < ndefault_modules; i++) {
+    if (env != gab_cinvalid &&
+        gab_rechas(env, gab_string(gab, default_modules[i])))
+      continue;
 
-    if (!config.silent)
-      publish_execution_error(estring, "value", {estring});
-
-    return cb(xeus::create_error_reply(estring, estring));
+    keys.push_back(default_modules[i]);
+    vals.push_back(gab_message(gab, default_module_values[i]));
   }
+
+  union gab_value_pair fiber =
+      gab_aexec(gab, (struct gab_exec_argt){
+                         .name = std::to_string(execution_counter).c_str(),
+                         .source = code.c_str(),
+                         .len = keys.size(),
+                         .sargv = keys.data(),
+                         .argv = vals.data(),
+                         .flags = 0,
+                     });
+
+  if (check_vresult(gab, fiber, cb))
+    return;
 
   union gab_value_pair result = gab_fibawait(gab, fiber.vresult);
 
@@ -117,26 +165,8 @@ void interpreter::execute_request_impl(
 
   assert(env != gab_cinvalid);
 
-  if (result.status != gab_cvalid) {
-    std::string estring = gab_errtocs(this->gab, result.vresult);
-
-    if (!config.silent)
-      publish_execution_error(estring, "value", {estring});
-
-    return cb(xeus::create_error_reply(estring, estring));
-  }
-
-  if (result.aresult->len == 0)
-    return cb(xeus::create_error_reply());
-
-  if (result.aresult->data[0] != gab_ok) {
-    std::string estring = gab_errtocs(this->gab, result.aresult->data[1]);
-
-    if (!config.silent)
-      publish_execution_error(estring, "value", {estring});
-
-    return cb(xeus::create_error_reply(estring, estring));
-  }
+  if (check_aresult(gab, result, cb))
+    return;
 
   // Stringify these into a list please
   gab_value rec = gab_list(gab, result.aresult->len, result.aresult->data);
